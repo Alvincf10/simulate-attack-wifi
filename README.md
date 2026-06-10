@@ -31,7 +31,7 @@ Do not use this on public or unauthorized networks. Misuse may violate the law.
   - `iwconfig`
   - `iw`
   - `ip` (from `iproute2`)
-  - `awk`, `sed`, `mktemp`
+  - `python3` (fallback parser for netxml when CSV is incomplete)
 
 Note: macOS typically does not support this workflow natively like Linux.
 
@@ -42,7 +42,7 @@ Install required system packages:
 ```bash
 sudo apt-get update
 sudo apt-get install -y \
-  aircrack-ng wireless-tools iw iproute2
+  aircrack-ng wireless-tools iw iproute2 python3
 ```
 
 ## Quick Flow (Driver Installed vs Not Installed)
@@ -115,44 +115,59 @@ If the interface appears, the driver is ready to use.
 sudo bash simulate-attack.sh <interface> [deauth_count]
 ```
 
+Check your interface name first:
+
+```bash
+ip link | grep -E 'wlx|wlan'
+```
+
 Examples:
 
 ```bash
-sudo bash simulate-attack.sh wlan0
-sudo bash simulate-attack.sh wlan0 10
+sudo bash simulate-attack.sh wlx00c0cab84bcf
+sudo bash simulate-attack.sh wlx00c0cab84bcf 10
+sudo SKIP_MODPROBE=1 bash simulate-attack.sh wlan0 10
 ```
 
 Parameters:
 
-- `<interface>`: initial Wi-Fi interface name (example: `wlan0`)
+- `<interface>`: initial Wi-Fi interface name (example: `wlx00c0cab84bcf` or `wlan0`)
 - `[deauth_count]`:
   - `0` (default): send continuously until manually stopped (`Ctrl + C`)
   - any other number (e.g. `10`): number of deauth frames per burst
 
+Environment variables:
+
+- `SKIP_MODPROBE=1` — skip `modprobe 8814au` reload (non-RTL8814AU adapters)
+- `AIRODUMP_BG=1` — background scan with timeout instead of fullscreen UI
+- `SCAN_SECONDS=40` — scan timeout when `AIRODUMP_BG=1` (default: 20)
+
 ## Script Flow
 
 1. Validate root, OS, and dependencies.
-2. Scan networks using `airodump-ng` (default timeout: 20 seconds).
-3. Show AP list from scan CSV, then prompt user to select target.
-4. Run `airmon-ng start` to enable monitor interface.
-5. Set monitor channel to target channel.
-6. Run `aireplay-ng --deauth`.
-7. Clean up interfaces at the end.
+2. Reload `8814au` driver (unless `SKIP_MODPROBE=1`).
+3. `airmon-ng start` → scan with `airodump-ng` on monitor interface (Ctrl+C when done).
+4. Show AP list from CSV/netxml (PWR, channel, encryption, ESSID), then prompt for target.
+5. `airmon-ng stop` → `airmon-ng start` again before deauth.
+6. Set monitor channel to target channel.
+7. Run `aireplay-ng --deauth`.
+8. Clean up interfaces at the end.
 
 ## Additional Configuration
 
-You can change scan duration using an environment variable:
+Background scan (no fullscreen airodump UI):
 
 ```bash
-SCAN_SECONDS=40 sudo bash simulate-attack.sh wlan0 10
+AIRODUMP_BG=1 SCAN_SECONDS=40 sudo bash simulate-attack.sh wlx00c0cab84bcf 10
 ```
 
 ## Quick Troubleshooting
 
-- `Interface not found`: check interface name with `ip link`.
+- `Interface not found`: check interface name with `ip link | grep -E 'wlx|wlan'`.
 - `Command not found`: install `aircrack-ng` / `wireless-tools`.
-- `No AP detected`: ensure adapter supports monitor mode, move closer to AP, or increase `SCAN_SECONDS`.
+- `No AP detected`: run `sudo airmon-ng check kill`, ensure monitor mode works, move closer to AP, or use `AIRODUMP_BG=1 SCAN_SECONDS=60`.
 - `Cannot detect monitor interface`: check `airmon-ng start <interface>` output manually.
+- Channel hopping during scan: stop NetworkManager with `sudo airmon-ng check kill`.
 
 ## Disclaimer
 
